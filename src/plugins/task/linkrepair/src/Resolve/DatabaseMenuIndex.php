@@ -11,6 +11,7 @@ namespace Yepr\Plugin\Task\LinkRepair\Resolve;
 
 use Joomla\Database\DatabaseInterface;
 use Joomla\Database\ParameterType;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentItem;
 
 // phpcs:disable PSR1.Files.SideEffects
 \defined('_JEXEC') or die;
@@ -36,9 +37,10 @@ final class DatabaseMenuIndex implements MenuIndex
 	private array $homes = [];
 
 	/**
-	 * @var  array<int, string>  Paths of menu items that show one article, by article id.
+	 * @var  array<string, array<int, string>>  Paths of menu items that show one article
+	 *                                          or one category, by kind and id.
 	 */
-	private array $articlePaths = [];
+	private array $itemPaths = [];
 
 	/**
 	 * @var  array<string, string>|null  Language codes by URL prefix.
@@ -84,11 +86,11 @@ final class DatabaseMenuIndex implements MenuIndex
 		return $this->prefixes[$prefix] ?? null;
 	}
 
-	public function pathForArticle(int $articleId): ?string
+	public function pathForItem(string $kind, int $id): ?string
 	{
 		$this->load();
 
-		return $this->articlePaths[$articleId] ?? null;
+		return $this->itemPaths[$kind][$id] ?? null;
 	}
 
 	private function load(): void
@@ -122,13 +124,31 @@ final class DatabaseMenuIndex implements MenuIndex
 				$this->homes[$item->language] = $item;
 			}
 
-			if (
-				(string) $row->type === 'component'
-				&& preg_match('#^index\.php\?option=com_content&view=article&id=(\d+)$#', (string) $row->link, $match)
-				&& !isset($this->articlePaths[(int) $match[1]])
-			) {
-				$this->articlePaths[(int) $match[1]] = $item->path;
+			if ((string) $row->type === 'component') {
+				$this->rememberPage((string) $row->link, $item->path);
 			}
+		}
+	}
+
+	/**
+	 * Notes the page of an article (com_content's article view) or of a category (the
+	 * category view of any component, as list or blog), the first menu item for each.
+	 */
+	private function rememberPage(string $link, string $path): void
+	{
+		parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
+
+		$view = $query['view'] ?? '';
+		$id   = (int) ($query['id'] ?? 0);
+
+		$kind = match (true) {
+			$view === 'article' && ($query['option'] ?? '') === 'com_content' => ContentItem::ARTICLE,
+			$view === 'category'                                              => ContentItem::CATEGORY,
+			default                                                           => null,
+		};
+
+		if ($kind !== null && $id > 0 && !isset($this->itemPaths[$kind][$id])) {
+			$this->itemPaths[$kind][$id] = $path;
 		}
 	}
 

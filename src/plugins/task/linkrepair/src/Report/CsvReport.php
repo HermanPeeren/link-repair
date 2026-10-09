@@ -24,7 +24,7 @@ use Yepr\Plugin\Task\LinkRepair\Store\Scan;
 final class CsvReport
 {
 	private const HEADER = [
-		'Article id', 'Article title', 'Page URL', 'Field', 'Link text', 'Link in the text',
+		'Type', 'Id', 'Title', 'Page URL', 'Field', 'Link text', 'Link in the text',
 		'State', 'Menu item', 'Menu item id', 'New link', 'Where the link ends up', 'Message',
 	];
 
@@ -53,8 +53,9 @@ final class CsvReport
 
 			foreach ($this->links->all($scan->id) as $link) {
 				fputcsv($handle, [
-					$link->articleId,
-					$link->articleTitle,
+					$link->itemKind,
+					$link->itemId,
+					$link->itemTitle,
 					$link->pageUrl,
 					$link->field,
 					$link->linkText,

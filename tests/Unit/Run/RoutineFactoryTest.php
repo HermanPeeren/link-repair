@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Yepr\Plugin\Task\LinkRepair\Tests\Unit\Run;
 
 use PHPUnit\Framework\TestCase;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentSources;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkExtractor;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkRewriter;
 use Yepr\Plugin\Task\LinkRepair\Report\CsvReport;
@@ -13,9 +14,9 @@ use Yepr\Plugin\Task\LinkRepair\Run\RoutineFactory;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeClock;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeMenuIndex;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeRedirectFollower;
-use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryArticles;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryLinkStore;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryScanStore;
+use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemorySource;
 use Yepr\Plugin\Task\LinkRepair\Url\InternalLinkFilter;
 
 final class RoutineFactoryTest extends TestCase
@@ -25,7 +26,7 @@ final class RoutineFactoryTest extends TestCase
         $links = new MemoryLinkStore();
 
         return new RoutineFactory(
-            new MemoryArticles(),
+            new ContentSources(MemorySource::articles(), MemorySource::categories(), MemorySource::modules()),
             new MemoryScanStore(),
             $links,
             new FakeMenuIndex(),

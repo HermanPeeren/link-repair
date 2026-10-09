@@ -5,24 +5,31 @@ declare(strict_types=1);
 namespace Yepr\Plugin\Task\LinkRepair\Tests\Unit\Scan;
 
 use PHPUnit\Framework\TestCase;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentItem;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentSources;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkExtractor;
 use Yepr\Plugin\Task\LinkRepair\Report\CsvReport;
 use Yepr\Plugin\Task\LinkRepair\Resolve\LinkResolver;
 use Yepr\Plugin\Task\LinkRepair\Resolve\LinkState;
 use Yepr\Plugin\Task\LinkRepair\Scan\Scanner;
+use Yepr\Plugin\Task\LinkRepair\Store\LinkRecord;
 use Yepr\Plugin\Task\LinkRepair\Store\Scan;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeClock;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeMenuIndex;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeRedirectFollower;
-use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryArticles;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryLinkStore;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryScanStore;
+use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemorySource;
 use Yepr\Plugin\Task\LinkRepair\Url\InternalLinkFilter;
 use Yepr\Plugin\Task\LinkRepair\Url\SiteAddress;
 
 final class ScannerTest extends TestCase
 {
-    private MemoryArticles $articles;
+    private MemorySource $articles;
+
+    private MemorySource $categories;
+
+    private MemorySource $modules;
 
     private MemoryScanStore $scans;
 
@@ -39,12 +46,14 @@ final class ScannerTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->articles  = new MemoryArticles();
-        $this->scans     = new MemoryScanStore();
-        $this->links     = new MemoryLinkStore();
-        $this->menus     = new FakeMenuIndex();
-        $this->redirects = new FakeRedirectFollower();
-        $this->folder    = sys_get_temp_dir() . '/linkrepair-test-' . bin2hex(random_bytes(4));
+        $this->articles   = MemorySource::articles();
+        $this->categories = MemorySource::categories();
+        $this->modules    = MemorySource::modules();
+        $this->scans      = new MemoryScanStore();
+        $this->links      = new MemoryLinkStore();
+        $this->menus      = new FakeMenuIndex();
+        $this->redirects  = new FakeRedirectFollower();
+        $this->folder     = sys_get_temp_dir() . '/linkrepair-test-' . bin2hex(random_bytes(4));
         mkdir($this->folder);
     }
 
@@ -60,7 +69,7 @@ final class ScannerTest extends TestCase
         $filter = new InternalLinkFilter();
 
         return new Scanner(
-            $this->articles,
+            new ContentSources($this->modules, $this->articles, $this->categories),
             $this->scans,
             $this->links,
             new LinkExtractor(),
@@ -80,7 +89,7 @@ final class ScannerTest extends TestCase
     public function testRecordsTheInternalLinksOfEveryArticle(): void
     {
         $this->menus->add(12, 'user-guide/seo', 'SEO');
-        $this->menus->showsArticle(1, 'tutorials/intro');
+        $this->menus->shows(ContentItem::ARTICLE, 1, 'tutorials/intro');
         $this->articles->put(1, '<a href="/user-guide/seo">SEO</a> <a href="https://docs.joomla.org/x">old docs</a>', '<a href="/gone">gone</a>');
         $this->articles->put(2, '<p>No links.</p>');
 
@@ -90,21 +99,44 @@ final class ScannerTest extends TestCase
         self::assertSame([LinkState::REPAIRABLE, LinkState::BROKEN], $this->links->states());
 
         $first = $this->links->records[1];
+        self::assertSame(ContentItem::ARTICLE, $first->itemKind);
         self::assertSame('introtext', $first->field);
         self::assertSame('SEO', $first->linkText);
         self::assertSame(12, $first->menuId);
         self::assertSame('index.php?Itemid=12', $first->newHref);
         self::assertSame('https://guide.joomla.org/tutorials/intro', $first->pageUrl);
-        self::assertSame($this->articles->get(1)->hash(), $first->articleHash);
+        self::assertSame($this->articles->get(1)->hash(), $first->itemHash);
         self::assertSame('fulltext', $this->links->records[2]->field);
 
-        self::assertStringContainsString('Scan 1 finished: 2 articles, 2 internal links (1 broken, 1 repairable).', implode('
-', $this->log));
+        self::assertStringContainsString(
+            'Scan 1 finished: 2 items (articles, categories, custom modules), 2 internal links (1 broken, 1 repairable).',
+            implode("\n", $this->log)
+        );
 
         $scan = $this->scans->scans[1];
         self::assertSame(Scan::FINISHED, $scan->status);
-        self::assertSame(2, $scan->articles);
+        self::assertSame(2, $scan->items);
         self::assertSame(2, $scan->links);
+    }
+
+    public function testScansCategoriesAndCustomModulesToo(): void
+    {
+        $this->menus->shows(ContentItem::CATEGORY, 8, 'blog');
+        $this->articles->put(1, '<a href="/a">a</a>');
+        $this->categories->put(8, '<p>See <a href="/b">b</a></p>');
+        $this->modules->put(90, '<a href="/c">c</a>');
+
+        $this->scanner()->run(7);
+
+        $found = array_values(array_map(
+            static fn (LinkRecord $record): string => $record->itemKind . ' ' . $record->itemId . ' ' . $record->field . ' ' . $record->href,
+            $this->links->records
+        ));
+
+        // In the order of the kinds' names, whatever order the sources were given in.
+        self::assertSame(['article 1 introtext /a', 'category 8 description /b', 'module 90 content /c'], $found);
+        self::assertSame('https://guide.joomla.org/blog', $this->links->records[2]->pageUrl);
+        self::assertSame('', $this->links->records[3]->pageUrl, 'a module has no page of its own');
     }
 
     public function testWritesTheReportWhenFinished(): void
@@ -114,27 +146,30 @@ final class ScannerTest extends TestCase
         $this->scanner()->run(7);
 
         $csv = (string) file_get_contents($this->folder . '/linkrepair-scan-1.csv');
-        self::assertStringStartsWith("\xEF\xBB\xBF\"Article id\",\"Article title\"", $csv);
+        self::assertStringStartsWith("\xEF\xBB\xBFType,Id,Title,\"Page URL\"", $csv);
+        self::assertStringContainsString('article,1,"Article 1",', $csv);
         self::assertStringContainsString(',/gone,broken,', $csv);
     }
 
-    public function testStopsWhenTheTimeIsUpAndContinuesNextRun(): void
+    public function testStopsWhenTheTimeIsUpAndContinuesNextRunAcrossKinds(): void
     {
-        for ($id = 1; $id <= 5; $id++) {
+        for ($id = 1; $id <= 3; $id++) {
             $this->articles->put($id, '<a href="/gone-' . $id . '">x</a>');
+            $this->modules->put($id, '<a href="/mod-' . $id . '">x</a>');
         }
 
-        // Every clock reading takes a second; a budget of 2.5 seconds leaves room for two articles.
+        // Every clock reading takes a second; a budget of 2.5 seconds leaves room for two items.
         $first = $this->scanner(2.5, 1.0)->run(7);
 
         self::assertFalse($first->finished);
+        self::assertSame(ContentItem::ARTICLE, $this->scans->scans[1]->cursorKind);
         self::assertSame(2, $this->scans->scans[1]->cursorId);
         self::assertCount(2, $this->links->records);
 
         $second = $this->scanner()->run(7);
 
         self::assertTrue($second->finished);
-        self::assertCount(5, $this->links->records);
+        self::assertCount(6, $this->links->records);
         self::assertCount(1, $this->scans->scans, 'the second run continued the same scan');
     }
 

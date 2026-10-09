@@ -14,7 +14,8 @@ namespace Yepr\Plugin\Task\LinkRepair\Store;
 // phpcs:enable PSR1.Files.SideEffects
 
 /**
- * One scan, and where scanning and repairing it have got to.
+ * One scan, and where scanning and repairing it have got to: a kind of content and the
+ * last id done in it, for each.
  *
  * Mutable on purpose: a run moves the cursors on and saves the scan again.
  */
@@ -30,10 +31,12 @@ final class Scan
 		public readonly int $id,
 		public readonly int $taskId,
 		public string $status = self::RUNNING,
+		public string $cursorKind = '',
 		public int $cursorId = 0,
-		public int $articles = 0,
+		public int $items = 0,
 		public int $links = 0,
 		public string $repairStatus = self::REPAIR_IDLE,
+		public string $repairKind = '',
 		public int $repairCursor = 0
 	) {
 	}

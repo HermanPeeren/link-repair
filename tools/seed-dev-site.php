@@ -151,12 +151,41 @@ $source = $article(
     . '<a href="index.php?Itemid=101">home, already a menu link</a>, <a href="#top">the top</a>, <a href="mailto:a@example.org">mail</a>.</p>',
     '<p>In the full text: <a href="' . $base . '/user-manual/seo-basics">SEO again</a>.</p>'
 );
-$menuItem('Links Of Every Kind', 'links', $source);
+$linksItem = $menuItem('Links Of Every Kind', 'links', $source);
 
 $twice = $article(
     'Same Link Twice',
     '<p><a href="' . $base . '/user-manual/seo-basics">once</a> and <a href="' . $base . '/user-manual/seo-basics">twice</a>.</p>'
 );
+
+// A category description and a custom module with typed links. The module is shown on
+// all pages except "Links Of Every Kind": a repair must keep exactly that assignment.
+$category = $api('POST', 'content/categories', [
+    'title'       => 'Guides',
+    'alias'       => 'guides',
+    'extension'   => 'com_content',
+    'parent_id'   => 1,
+    'published'   => 1,
+    'language'    => '*',
+    'description' => '<p>See <a href="' . $base . '/user-manual/seo-basics">SEO</a> and <a href="' . $base . '/user-guide/menus">menus</a>.</p>',
+]);
+
+// The Web Services API cannot make a module (it drops the params, which the table
+// requires), so the module goes into the database directly. "All pages except" is
+// stored as the menu item id made negative.
+$db->execute_query(
+    "INSERT INTO {$prefix}modules (title, note, content, ordering, position, published, module, access, showtitle, params, client_id, language)"
+    . " VALUES (?, '', ?, 1, 'sidebar-right', 1, 'mod_custom', 1, 1, '{\"prepare_content\":\"0\"}', 0, '*')",
+    ['Useful Links', '<ul><li><a href="' . $base . '/user-manual/seo-basics">SEO</a></li></ul>']
+);
+$module = (int) $db->insert_id;
+$db->execute_query("INSERT INTO {$prefix}modules_menu (moduleid, menuid) VALUES (?, ?)", [$module, -$linksItem]);
+
+printf("Category %d, custom module %d.\n", (int) $category['data']['id'], $module);
+
+// The "Welcome to Joomla" tour starts by itself on a fresh site and sends the browser
+// to the dashboard, which makes the Cypress specs land there instead of on the task form.
+$db->execute_query("UPDATE {$prefix}guidedtours SET autostart = 0 WHERE autostart = 1");
 
 // URL rewriting, with one redirect rule like the ones guide.joomla.org uses.
 $htaccess = (string) file_get_contents($joomla . '/htaccess.txt');

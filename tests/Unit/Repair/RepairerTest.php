@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Yepr\Plugin\Task\LinkRepair\Tests\Unit\Repair;
 
 use PHPUnit\Framework\TestCase;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentItem;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentSources;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkRewriter;
 use Yepr\Plugin\Task\LinkRepair\Repair\Repairer;
 use Yepr\Plugin\Task\LinkRepair\Repair\RepairSettings;
@@ -13,13 +15,17 @@ use Yepr\Plugin\Task\LinkRepair\Resolve\LinkState;
 use Yepr\Plugin\Task\LinkRepair\Store\LinkRecord;
 use Yepr\Plugin\Task\LinkRepair\Store\Scan;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\FakeClock;
-use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryArticles;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryLinkStore;
 use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemoryScanStore;
+use Yepr\Plugin\Task\LinkRepair\Tests\Support\MemorySource;
 
 final class RepairerTest extends TestCase
 {
-    private MemoryArticles $articles;
+    private MemorySource $articles;
+
+    private MemorySource $categories;
+
+    private MemorySource $modules;
 
     private MemoryScanStore $scans;
 
@@ -32,10 +38,12 @@ final class RepairerTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->articles = new MemoryArticles();
-        $this->scans    = new MemoryScanStore();
-        $this->links    = new MemoryLinkStore();
-        $this->folder   = sys_get_temp_dir() . '/linkrepair-test-' . bin2hex(random_bytes(4));
+        $this->articles   = MemorySource::articles();
+        $this->categories = MemorySource::categories();
+        $this->modules    = MemorySource::modules();
+        $this->scans      = new MemoryScanStore();
+        $this->links      = new MemoryLinkStore();
+        $this->folder     = sys_get_temp_dir() . '/linkrepair-test-' . bin2hex(random_bytes(4));
         mkdir($this->folder);
     }
 
@@ -48,7 +56,7 @@ final class RepairerTest extends TestCase
     private function repairer(bool $dryRun = false, float $budget = 20.0, float $clockStep = 0.0): Repairer
     {
         return new Repairer(
-            $this->articles,
+            new ContentSources($this->articles, $this->categories, $this->modules),
             $this->scans,
             $this->links,
             new LinkRewriter(),
@@ -72,21 +80,24 @@ final class RepairerTest extends TestCase
         $this->scans->save($scan);
 
         foreach ($articleIds as $id) {
-            $this->links->add([$this->record($scan->id, $id, '/user-manual/seo', 'index.php?Itemid=12')]);
+            $this->links->add([$this->record($scan->id, $this->articles, $id, '/user-manual/seo', 'index.php?Itemid=12')]);
         }
 
         return $scan;
     }
 
-    private function record(int $scanId, int $articleId, string $href, string $newHref, string $field = 'introtext'): LinkRecord
+    private function record(int $scanId, MemorySource $source, int $itemId, string $href, string $newHref, string $field = ''): LinkRecord
     {
+        $item = $source->get($itemId);
+
         return new LinkRecord(
             0,
             $scanId,
-            $articleId,
-            'Article ' . $articleId,
+            $item->kind,
+            $itemId,
+            $item->title,
             '',
-            $field,
+            $field === '' ? (string) array_key_first($item->fields) : $field,
             'text',
             $href,
             LinkState::REPAIRABLE,
@@ -95,7 +106,7 @@ final class RepairerTest extends TestCase
             'SEO',
             $newHref,
             '',
-            $this->articles->get($articleId)->hash()
+            $item->hash()
         );
     }
 
@@ -109,7 +120,7 @@ final class RepairerTest extends TestCase
         self::assertTrue($outcome->finished);
         self::assertSame(
             '<p><a href="index.php?Itemid=12">SEO</a> and <a href="index.php?Itemid=12">again</a></p>',
-            $this->articles->get(1)->introtext
+            $this->articles->get(1)->fields['introtext']
         );
         self::assertSame([['id' => 1, 'userId' => 42, 'note' => 'Link repair: 1 link(s) now point to menu items']], $this->articles->saves);
         self::assertSame([LinkState::REPAIRED], $this->links->states());
@@ -120,15 +131,38 @@ final class RepairerTest extends TestCase
         $this->articles->put(1, '<a href="/a">a</a>', '<a href="/b">b</a>');
         $scan = $this->scanned();
         $this->links->add([
-            $this->record($scan->id, 1, '/a', 'index.php?Itemid=1'),
-            $this->record($scan->id, 1, '/b', 'index.php?Itemid=2', 'fulltext'),
+            $this->record($scan->id, $this->articles, 1, '/a', 'index.php?Itemid=1', 'introtext'),
+            $this->record($scan->id, $this->articles, 1, '/b', 'index.php?Itemid=2', 'fulltext'),
         ]);
 
         $this->repairer()->run();
 
-        self::assertSame('<a href="index.php?Itemid=1">a</a>', $this->articles->get(1)->introtext);
-        self::assertSame('<a href="index.php?Itemid=2">b</a>', $this->articles->get(1)->fulltext);
+        self::assertSame('<a href="index.php?Itemid=1">a</a>', $this->articles->get(1)->fields['introtext']);
+        self::assertSame('<a href="index.php?Itemid=2">b</a>', $this->articles->get(1)->fields['fulltext']);
         self::assertCount(1, $this->articles->saves, 'one save per article');
+    }
+
+    public function testRepairsCategoriesAndCustomModulesThroughTheirOwnSource(): void
+    {
+        $this->articles->put(1, '<a href="/a">a</a>');
+        $this->categories->put(8, '<a href="/b">b</a>');
+        $this->modules->put(90, '<a href="/c">c</a>');
+        $scan = $this->scanned();
+        $this->links->add([
+            $this->record($scan->id, $this->modules, 90, '/c', 'index.php?Itemid=3'),
+            $this->record($scan->id, $this->categories, 8, '/b', 'index.php?Itemid=2'),
+            $this->record($scan->id, $this->articles, 1, '/a', 'index.php?Itemid=1'),
+        ]);
+
+        $this->repairer()->run();
+
+        self::assertSame('<a href="index.php?Itemid=2">b</a>', $this->categories->get(8)->fields['description']);
+        self::assertSame('<a href="index.php?Itemid=3">c</a>', $this->modules->get(90)->fields['content']);
+        self::assertCount(1, $this->articles->saves);
+        self::assertCount(1, $this->categories->saves);
+        self::assertCount(1, $this->modules->saves);
+        self::assertSame([LinkState::REPAIRED, LinkState::REPAIRED, LinkState::REPAIRED], $this->links->states());
+        self::assertStringContainsString('Module 90 "Module 90": 1 link(s) repaired.', implode("\n", $this->log));
     }
 
     public function testADryRunChangesNothing(): void
@@ -143,7 +177,7 @@ final class RepairerTest extends TestCase
         self::assertStringContainsString('Would change in article 1', implode("\n", $this->log));
     }
 
-    public function testSkipsAnArticleThatChangedSinceTheScan(): void
+    public function testSkipsAnItemThatChangedSinceTheScan(): void
     {
         $this->articles->put(1, '<a href="/user-manual/seo">SEO</a>');
         $this->scanned(1);
@@ -156,7 +190,7 @@ final class RepairerTest extends TestCase
         self::assertStringContainsString('scan again', $this->links->records[1]->message);
     }
 
-    public function testSkipsACheckedOutArticle(): void
+    public function testSkipsACheckedOutItem(): void
     {
         $this->articles->put(1, '<a href="/user-manual/seo">SEO</a>', '', checkedOut: 5);
         $this->scanned(1);
@@ -203,5 +237,35 @@ final class RepairerTest extends TestCase
     {
         self::assertTrue($this->repairer()->run()->finished);
         self::assertStringContainsString('no finished scan', implode("\n", $this->log));
+    }
+
+    public function testAnItemOfAnUnknownKindFails(): void
+    {
+        $scan = $this->scanned();
+        $this->links->add([
+            new LinkRecord(
+                0,
+                $scan->id,
+                'weblink',
+                3,
+                'x',
+                '',
+                'description',
+                'x',
+                '/x',
+                LinkState::REPAIRABLE,
+                '',
+                1,
+                'x',
+                'index.php?Itemid=1',
+                '',
+                ''
+            ),
+        ]);
+
+        $this->repairer()->run();
+
+        self::assertSame([LinkState::FAILED], $this->links->states());
+        self::assertSame(ContentItem::ARTICLE, $this->articles->kind());
     }
 }

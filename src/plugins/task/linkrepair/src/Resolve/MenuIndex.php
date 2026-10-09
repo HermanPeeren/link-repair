@@ -35,7 +35,10 @@ interface MenuIndex
 	public function languageForPrefix(string $prefix): ?string;
 
 	/**
-	 * The route of a menu item that shows this one article, if there is one.
+	 * The route of a menu item that shows this one article or category, if there is
+	 * one. Custom modules have no page of their own.
+	 *
+	 * @param   string  $kind  A ContentItem kind.
 	 */
-	public function pathForArticle(int $articleId): ?string;
+	public function pathForItem(string $kind, int $id): ?string;
 }

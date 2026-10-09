@@ -9,7 +9,7 @@
 
 namespace Yepr\Plugin\Task\LinkRepair\Run;
 
-use Yepr\Plugin\Task\LinkRepair\Content\ArticleGateway;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentSources;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkExtractor;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkRewriter;
 use Yepr\Plugin\Task\LinkRepair\Repair\Repairer;
@@ -43,7 +43,7 @@ final class RoutineFactory
 	public const MAX_BUDGET     = 300;
 
 	public function __construct(
-		private readonly ArticleGateway $articles,
+		private readonly ContentSources $sources,
 		private readonly ScanStore $scans,
 		private readonly LinkStore $links,
 		private readonly MenuIndex $menus,
@@ -77,7 +77,7 @@ final class RoutineFactory
 		$resolver = new LinkResolver($this->menus, $follow ? $this->redirects : null, $this->filter, $site);
 
 		return new Scanner(
-			$this->articles,
+			$this->sources,
 			$this->scans,
 			$this->links,
 			$this->extractor,
@@ -105,7 +105,7 @@ final class RoutineFactory
 			$this->budget($params)
 		);
 
-		return new Repairer($this->articles, $this->scans, $this->links, $this->rewriter, $this->report, $this->clock, $settings, $log);
+		return new Repairer($this->sources, $this->scans, $this->links, $this->rewriter, $this->report, $this->clock, $settings, $log);
 	}
 
 	private function budget(object $params): float

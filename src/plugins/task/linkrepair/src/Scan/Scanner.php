@@ -9,8 +9,8 @@
 
 namespace Yepr\Plugin\Task\LinkRepair\Scan;
 
-use Yepr\Plugin\Task\LinkRepair\Content\Article;
-use Yepr\Plugin\Task\LinkRepair\Content\ArticleGateway;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentItem;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentSources;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkExtractor;
 use Yepr\Plugin\Task\LinkRepair\Report\CsvReport;
 use Yepr\Plugin\Task\LinkRepair\Resolve\LinkResolver;
@@ -29,17 +29,17 @@ use Yepr\Plugin\Task\LinkRepair\Url\SiteAddress;
 // phpcs:enable PSR1.Files.SideEffects
 
 /**
- * One run of a scan: reads articles from where the last run stopped, until they are
- * all done or the time budget is used up.
+ * One run of a scan: reads articles, categories and custom modules from where the last
+ * run stopped, until they are all done or the time budget is used up.
  *
- * Articles are read a page at a time and the position is saved after every page,
- * so a run that is cut off loses at most one page, which the next run reads again.
- * The links of an article are stored together, all or none.
+ * Items are read a page at a time, one kind after the other, and the position (kind and
+ * id) is saved after every page, so a run that is cut off loses at most one page, which
+ * the next run reads again. The links of an item are stored together, all or none.
  */
 final class Scanner
 {
 	/**
-	 * Articles read per query.
+	 * Items read per query.
 	 */
 	public const PAGE_SIZE = 20;
 
@@ -47,7 +47,7 @@ final class Scanner
 	 * @param   callable(string, string): void  $log  Receives a message and a priority.
 	 */
 	public function __construct(
-		private readonly ArticleGateway $articles,
+		private readonly ContentSources $sources,
 		private readonly ScanStore $scans,
 		private readonly LinkStore $links,
 		private readonly LinkExtractor $extractor,
@@ -71,27 +71,42 @@ final class Scanner
 			$scan = $this->scans->start($taskId);
 			$this->log(\sprintf('Scan %d started.', $scan->id));
 		} else {
-			$this->log(\sprintf('Scan %d continues after article %d.', $scan->id, $scan->cursorId));
+			$this->log(\sprintf('Scan %d continues after %s %d.', $scan->id, $scan->cursorKind, $scan->cursorId));
+		}
+
+		if ($scan->cursorKind === '') {
+			$scan->cursorKind = (string) $this->sources->first();
+			$scan->cursorId   = 0;
 		}
 
 		while (true) {
-			$page = $this->articles->page($scan->cursorId, self::PAGE_SIZE);
+			$page = $this->sources->get($scan->cursorKind)->page($scan->cursorId, self::PAGE_SIZE);
 
 			if ($page === []) {
-				return $this->finish($scan);
+				$next = $this->sources->after($scan->cursorKind);
+
+				if ($next === null) {
+					return $this->finish($scan);
+				}
+
+				$scan->cursorKind = $next;
+				$scan->cursorId   = 0;
+				$this->scans->save($scan);
+
+				continue;
 			}
 
-			foreach ($page as $article) {
+			foreach ($page as $item) {
 				if ($this->clock->now() >= $deadline) {
 					$this->scans->save($scan);
-					$this->log(\sprintf('Scan %d: %d articles so far; continues in the next run.', $scan->id, $scan->articles));
+					$this->log(\sprintf('Scan %d: %d items so far; continues in the next run.', $scan->id, $scan->items));
 
 					return new RunOutcome(false);
 				}
 
-				$scan->links += $this->scanArticle($scan, $article);
-				$scan->articles++;
-				$scan->cursorId = $article->id;
+				$scan->links += $this->scanItem($scan, $item);
+				$scan->items++;
+				$scan->cursorId = $item->id;
 			}
 
 			$this->scans->save($scan);
@@ -101,14 +116,14 @@ final class Scanner
 	/**
 	 * @return  int  The number of internal links found.
 	 */
-	private function scanArticle(Scan $scan, Article $article): int
+	private function scanItem(Scan $scan, ContentItem $item): int
 	{
-		$path    = $this->menus->pathForArticle($article->id);
+		$path    = $this->menus->pathForItem($item->kind, $item->id);
 		$pageUrl = $path === null ? '' : $this->site->absolute($path);
 		$records = [];
 
-		foreach (Article::FIELDS as $field) {
-			foreach ($this->extractor->extract($article->text($field)) as $link) {
+		foreach ($item->fields as $field => $html) {
+			foreach ($this->extractor->extract($html) as $link) {
 				$internal = $this->filter->classify($link->href, $this->site);
 
 				if ($internal === null) {
@@ -120,8 +135,9 @@ final class Scanner
 				$records[] = new LinkRecord(
 					0,
 					$scan->id,
-					$article->id,
-					$article->title,
+					$item->kind,
+					$item->id,
+					$item->title,
 					$pageUrl,
 					$field,
 					$link->text,
@@ -132,7 +148,7 @@ final class Scanner
 					$resolution->menuItem->title ?? '',
 					$resolution->newHref,
 					$resolution->message,
-					$article->hash()
+					$item->hash()
 				);
 			}
 		}
@@ -151,9 +167,9 @@ final class Scanner
 		ksort($counts);
 
 		$this->log(\sprintf(
-			'Scan %d finished: %d articles, %d internal links (%s).',
+			'Scan %d finished: %d items (articles, categories, custom modules), %d internal links (%s).',
 			$scan->id,
-			$scan->articles,
+			$scan->items,
 			$scan->links,
 			$counts === [] ? 'none' : implode(', ', array_map(
 				static fn (string $state, int $n): string => $n . ' ' . $state,

@@ -18,8 +18,8 @@ final class FakeMenuIndex implements MenuIndex
     /** @var array<string, string> */
     private array $prefixes = [];
 
-    /** @var array<int, string> */
-    private array $articlePaths = [];
+    /** @var array<string, array<int, string>> */
+    private array $itemPaths = [];
 
     private ?MenuItem $home = null;
 
@@ -41,9 +41,9 @@ final class FakeMenuIndex implements MenuIndex
         $this->prefixes[$prefix] = $language;
     }
 
-    public function showsArticle(int $articleId, string $path): void
+    public function shows(string $kind, int $id, string $path): void
     {
-        $this->articlePaths[$articleId] = $path;
+        $this->itemPaths[$kind][$id] = $path;
     }
 
     public function find(string $path, ?string $language = null): ?MenuItem
@@ -71,8 +71,8 @@ final class FakeMenuIndex implements MenuIndex
         return $this->prefixes[$prefix] ?? null;
     }
 
-    public function pathForArticle(int $articleId): ?string
+    public function pathForItem(string $kind, int $id): ?string
     {
-        return $this->articlePaths[$articleId] ?? null;
+        return $this->itemPaths[$kind][$id] ?? null;
     }
 }

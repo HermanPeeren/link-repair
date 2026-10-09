@@ -17,9 +17,11 @@ use Joomla\Database\DatabaseInterface;
 use Joomla\DI\Container;
 use Joomla\DI\ServiceProviderInterface;
 use Joomla\Http\HttpFactory;
-use Yepr\Plugin\Task\LinkRepair\Content\ArticleGateway;
-use Yepr\Plugin\Task\LinkRepair\Content\ArticleModelFactory;
-use Yepr\Plugin\Task\LinkRepair\Content\JoomlaArticleGateway;
+use Yepr\Plugin\Task\LinkRepair\Content\AdminModelSaver;
+use Yepr\Plugin\Task\LinkRepair\Content\ArticleSource;
+use Yepr\Plugin\Task\LinkRepair\Content\CategorySource;
+use Yepr\Plugin\Task\LinkRepair\Content\ContentSources;
+use Yepr\Plugin\Task\LinkRepair\Content\ModuleSource;
 use Yepr\Plugin\Task\LinkRepair\Extension\LinkRepair;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkExtractor;
 use Yepr\Plugin\Task\LinkRepair\Html\LinkRewriter;
@@ -70,19 +72,26 @@ return new class () implements ServiceProviderInterface {
 		);
 
 		$container->share(
-			ArticleModelFactory::class,
-			static fn (Container $container): ArticleModelFactory => new ArticleModelFactory(
+			AdminModelSaver::class,
+			static fn (Container $container): AdminModelSaver => new AdminModelSaver(
 				Factory::getApplication(),
 				$container->get(UserFactoryInterface::class)
 			)
 		);
 
+		// The kinds of content that are scanned and repaired.
 		$container->share(
-			ArticleGateway::class,
-			static fn (Container $container): ArticleGateway => new JoomlaArticleGateway(
-				$container->get(DatabaseInterface::class),
-				$container->get(ArticleModelFactory::class)
-			)
+			ContentSources::class,
+			static function (Container $container): ContentSources {
+				$db    = $container->get(DatabaseInterface::class);
+				$saver = $container->get(AdminModelSaver::class);
+
+				return new ContentSources(
+					new ArticleSource($db, $saver),
+					new CategorySource($db, $saver),
+					new ModuleSource($db, $saver)
+				);
+			}
 		);
 
 		$container->share(
@@ -101,7 +110,7 @@ return new class () implements ServiceProviderInterface {
 		$container->share(
 			RoutineFactory::class,
 			static fn (Container $container): RoutineFactory => new RoutineFactory(
-				$container->get(ArticleGateway::class),
+				$container->get(ContentSources::class),
 				$container->get(ScanStore::class),
 				$container->get(LinkStore::class),
 				$container->get(MenuIndex::class),

@@ -7,7 +7,7 @@
 ```
 src/
   linkrepair.xml                         the manifest; <files folder="plugins/task/linkrepair">
-  script.php                             install script (a service provider): Joomla 6 / PHP 8.3 checks, enables the plugin
+  script.php                             install script (a service provider): Joomla 6.1 / PHP 8.3 checks, enables the plugin
   plugins/task/linkrepair/
     services/provider.php                the composition root: registers the services, builds the plugin lazily
     forms/scan.xml, forms/repair.xml     the tasks' parameters
@@ -26,7 +26,12 @@ src/
       Resolve/LinkResolver.php           path -> menu item, following redirects if needed
       Resolve/DatabaseMenuIndex.php      menu items by route (#__menu.path)
       Resolve/HttpRedirectFollower.php   redirects, by hand, own hosts only
-      Content/JoomlaArticleGateway.php   read articles; save through com_content's ArticleModel
+      Content/ContentSources.php         the kinds of content, in the order they are read
+      Content/TableSource.php            reading a page of rows, or one row
+      Content/ArticleSource.php          articles; saved through com_content's ArticleModel
+      Content/CategorySource.php         category descriptions; saved through com_categories' CategoryModel
+      Content/ModuleSource.php           custom modules; saved through com_modules' ModuleModel
+      Content/AdminModelSaver.php        a fresh component model per save, as the item's user
       Store/                             the two tables, behind ScanStore and LinkStore
       Report/CsvReport.php               the CSV in the log folder
 tests/
@@ -50,8 +55,8 @@ that wires them together, in the child container Joomla gives each extension:
 | `MenuIndex` | `DatabaseMenuIndex` on the site's `DatabaseInterface` |
 | `RedirectFollower` | `HttpRedirectFollower` on Joomla's HTTP client, with automatic redirects off |
 | `ScanStore`, `LinkStore` | `DatabaseScanStore`, `DatabaseLinkStore` on the database |
-| `ArticleModelFactory` | the application and `UserFactoryInterface` |
-| `ArticleGateway` | `JoomlaArticleGateway` on the database and the model factory |
+| `AdminModelSaver` | the application and `UserFactoryInterface` |
+| `ContentSources` | `ArticleSource`, `CategorySource`, `ModuleSource` on the database and the saver |
 | `CsvReport` | the link store and the site's log folder |
 | `LinkExtractor`, `LinkRewriter`, `InternalLinkFilter`, `Clock` | themselves |
 | `RoutineFactory` | all of the above |
@@ -63,9 +68,9 @@ that runs no task builds none of it.
 What differs per task (the site's address, follow redirects, dry run, the user, the time
 budget) comes from the task's parameters, so `RoutineFactory` makes the resolver, the
 scanner and the repairer per run; it is the only place they are made. Per save, com_content's
-`ArticleModel` is made by `ArticleModelFactory`, because a model keeps state between saves.
+component model is made by `AdminModelSaver`, because a model keeps state between saves.
 
-Value objects (`Article`, `HtmlLink`, `InternalLink`, `MenuItem`, `Resolution`,
+Value objects (`ContentItem`, `HtmlLink`, `InternalLink`, `MenuItem`, `Resolution`,
 `RedirectResult`, `LinkRecord`, `Scan`, `RepairSettings`, `RunOutcome`) and exceptions are
 created where they arise.
 
@@ -101,9 +106,14 @@ php tools/seed-dev-site.php
 `tools/seed-dev-site.php` creates, through Joomla's Web Services API: a small menu
 (User Guide > SEO Basics, Menus), an article with every kind of link the plugin meets
 (current path, old path, `index.php/` with an anchor, absolute, with a query, broken, and
-links it must leave alone), an article with the same old link twice, URL rewriting, and a
-redirect `user-manual/... -> user-guide/...` in `.htaccess`. The scan then finds 9 links:
-7 repairable, 1 with a query string, 1 broken.
+links it must leave alone), an article with the same old link twice, a category with links
+in its description, a custom module with a link that is shown on all pages except one, URL
+rewriting, and a redirect `user-manual/... -> user-guide/...` in `.htaccess`. The scan then
+finds 12 links: 10 repairable, 1 with a query string, 1 broken.
+
+It also switches off the auto-start of Joomla's guided tours. On a fresh site the "Welcome
+to Joomla" tour starts by itself and takes the browser to the dashboard, which now and then
+makes a Cypress spec land there instead of on the task form.
 
 Create the tasks in *System > Scheduled Tasks* (site address
 `http://localhost/link-repair/joomla`), and run them from the command line:
@@ -138,7 +148,9 @@ The task log is `joomla/administrator/logs/joomla_scheduler.php`; the report is
   visitor's request (lazy scheduler), so the plugin does not do that. Better fixed in core.
 - **Links to pages that are not a menu item** (an article shown through a category blog)
   are reported as *unmatched*, not repaired. See "Later" in [plan.md](plan.md).
-- Only articles: custom modules and category descriptions are not scanned yet.
+- **Module versions** are only recorded when *Enable Versions* is on in the Modules options;
+  Joomla has it off by default. Articles and categories have it on by default.
+- Other content (contacts' misc info, fields with HTML) is not scanned yet.
 
 ## Releasing
 

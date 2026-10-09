@@ -35,9 +35,9 @@ return new class () implements ServiceProviderInterface {
 			) implements InstallerScriptInterface {
 				/**
 				 * The oldest Joomla this runs on: the plugin's provider uses the lazy
-				 * plugin loading of Joomla 6.
+				 * plugin loading ($container->lazy()), which came in Joomla 6.1.
 				 */
-				private const MINIMUM_JOOMLA = '6.0';
+				private const MINIMUM_JOOMLA = '6.1';
 
 				/**
 				 * The oldest PHP this runs on, which is Joomla 6's own minimum.

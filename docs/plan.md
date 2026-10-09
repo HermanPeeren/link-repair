@@ -11,10 +11,10 @@ page view. This plugin turns typed internal links into such menu item links.
 
 ## Two task routines
 
-| Routine | What it does | Writes to articles? |
+| Routine | What it does | Changes content? |
 |---|---|---|
-| **Link repair: scan** | Reads every article, finds the internal links, works out which menu item each one means, and records the result. Writes a CSV report. | No |
-| **Link repair: repair** | Takes the latest finished scan and rewrites the links it could resolve, article by article. Dry run by default. | Yes |
+| **Link repair: scan** | Reads every article, category description and custom module, finds the internal links, works out which menu item each one means, and records the result. Writes a CSV report. | No |
+| **Link repair: repair** | Takes the latest finished scan and rewrites the links it could resolve, item by item. Dry run by default. | Yes |
 
 Two routines rather than one, so that a scan can run on its own (as a report, or on a
 schedule), someone can read the report, and only then is repair run.
@@ -24,14 +24,18 @@ schedule), someone can read the report, and only then is repair run.
 Both routines work within a **time budget** per run (a task parameter, default 20
 seconds). When the budget is used up and work remains, the routine saves where it was
 and returns `Status::WILL_RESUME`; the scheduler runs it again straight away (in the
-next scheduler tick), until the routine returns `Status::OK`. Articles are read in
-small pages (`id > cursor`, ordered by id), so memory stays flat however many articles
+next scheduler tick), until the routine returns `Status::OK`. Items are read in
+small pages (`id > cursor`, ordered by id), so memory stays flat however many items
 there are. The position (the cursor) is in the plugin's own table, so a crash or a
-time-out loses at most the article being worked on.
+time-out loses at most the item being worked on.
 
 ## What counts as an internal link
 
-From each `<a href="...">` in an article's intro text and full text:
+Where links are looked for (since 0.2.0): articles (intro text and full text), category
+descriptions of every component, and custom modules (`mod_custom`) on the site. Each
+kind is a `ContentSource`; items are read kind by kind (article, category, module), by id.
+
+From each `<a href="...">` in those texts:
 
 - **Ignored:** empty links, `#anchors`, `mailto:`, `tel:`, `javascript:`, `data:`,
   links that are already Joomla links (`index.php?...`), links to other hosts, and
@@ -71,10 +75,19 @@ Before changing an article, repair checks:
 - **Unchanged since the scan:** the scan recorded a hash of the intro text and full
   text. If someone edited the article since, it is skipped with "changed since the
   scan; scan again".
-- **Not checked out:** an article open in someone's editor is skipped, so their save
+- **Not checked out:** an item open in someone's editor is skipped, so their save
   does not undo the repair (or the other way round).
 
-The article is saved through com_content's own ArticleModel, as the article editor saves
+Each kind is saved through its own component's model, as its editor saves it:
+com_content's ArticleModel, com_categories' CategoryModel (with the category's own
+extension, so its versions are filed under `com_content.category`, `com_contact.category`
+and so on), and com_modules' ModuleModel. That last one deletes a module's menu
+assignments on every save and writes them again from the form data, so the save sends
+the current assignment along in the form's shape (the mode, and positive menu item ids;
+the model's own getItem() returns them signed, which would turn "all pages except" into
+"only").
+
+An article is saved through com_content's own ArticleModel, as the article editor saves
 it: content plugins, Smart Search and the version history all take part. (In Joomla 6
 versions are written by the model, not the table.) So every repair has a version, with
 the note "Link repair: N link(s) now point to menu items", and can be undone from
@@ -89,7 +102,7 @@ change.
 | Table | Holds |
 |---|---|
 | `#__linkrepair_scans` | one row per scan: task, status (running / finished), cursor, counts, start and end time |
-| `#__linkrepair_links` | one row per link found: scan, article, field, link text, link as found, resolution (state, final URL, menu item, new link), repair result and message |
+| `#__linkrepair_links` | one row per link found: scan, item (kind and id), field, link text, link as found, resolution (state, final URL, menu item, new link), repair result and message |
 
 States of a link: `repairable`, `query` (has a query string), `unmatched` (exists, no
 menu item), `broken`, and after repair `repaired`, `skipped`, `failed`.
@@ -100,8 +113,8 @@ without end. Uninstalling drops both tables.
 ## Reports
 
 At the end of a scan, and after every repair run, a CSV is written to the site's log
-folder: `linkrepair-scan-<id>.csv`, with article id and title, the page URL (when the
-article has its own menu item), link text, link as found, state, menu item and new
+folder: `linkrepair-scan-<id>.csv`, with the item's kind, id and title, the page URL (when the
+article or category has its own menu item), link text, link as found, state, menu item and new
 link, and the message. The task log in *System > Scheduled Tasks* has the totals.
 
 ## Security
@@ -109,8 +122,8 @@ link, and the message. The task log in *System > Scheduled Tasks* has the totals
 - All SQL through the query builder with bound parameters, including inserts.
 - HTTP only to the site's own hosts, `HEAD` only, short time-out, at most 5 hops.
 - Nothing is changed in a dry run, and the default is a dry run.
-- Only `href` values are rewritten, only in articles from the scan, only when the
-  article is unchanged since.
+- Only `href` values are rewritten, only in items from the scan, only when the
+  item is unchanged since.
 
 ## Code structure
 
@@ -122,13 +135,13 @@ Composition root in `services/provider.php` (lazy plugin, constructor injection,
 | `Html\LinkExtractor` | find `<a href>` and the link text in HTML |
 | `Html\LinkRewriter` | replace one `href` value in `<a>` tags, nothing else |
 | `Url\InternalLinkFilter` | internal or not, and the normalised path |
-| `Resolve\MenuIndex` (interface) + `DatabaseMenuIndex` | path → menu item; article → page path |
+| `Resolve\MenuIndex` (interface) + `DatabaseMenuIndex` | path → menu item; article or category → page path |
 | `Resolve\RedirectFollower` (interface) + `HttpRedirectFollower` | follow redirects on the own hosts |
 | `Resolve\LinkResolver` | the steps under "Finding the menu item" |
 | `Scan\Scanner` | one scan run within the time budget |
 | `Repair\Repairer` | one repair run within the time budget |
 | `Store\...` | the two tables, behind interfaces |
-| `Content\ArticleGateway` | read article pages; save one article through com_content's ArticleModel |
+| `Content\ContentSources` + `ArticleSource`, `CategorySource`, `ModuleSource` | read items a page at a time; save one through its component's model (`AdminModelSaver`) |
 | `Report\CsvReport` | the CSV |
 | `Extension\LinkRepair` | the task plugin: parameters in, exit code out |
 
@@ -136,5 +149,4 @@ Composition root in `services/provider.php` (lazy plugin, constructor injection,
 
 - Links to articles that are not a menu item (category blog items): link to the
   article (`index.php?option=com_content&view=article&id=..&catid=..`) instead.
-- Other content: custom modules, category descriptions.
 - A small admin view of the report instead of the CSV.

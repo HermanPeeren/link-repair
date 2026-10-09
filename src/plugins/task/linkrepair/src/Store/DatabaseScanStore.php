@@ -71,27 +71,33 @@ final class DatabaseScanStore implements ScanStore
 	{
 		$id       = $scan->id;
 		$status   = $scan->status;
+		$kind     = $scan->cursorKind;
 		$cursor   = $scan->cursorId;
-		$articles = $scan->articles;
+		$items    = $scan->items;
 		$links    = $scan->links;
 		$repair   = $scan->repairStatus;
+		$rkind    = $scan->repairKind;
 		$rcursor  = $scan->repairCursor;
 		$finished = $scan->status === Scan::FINISHED ? gmdate('Y-m-d H:i:s') : null;
 
 		$query = $this->db->getQuery(true)
 			->update($this->db->quoteName(self::SCANS))
 			->set($this->db->quoteName('status') . ' = :status')
+			->set($this->db->quoteName('cursor_type') . ' = :kind')
 			->set($this->db->quoteName('cursor_id') . ' = :cursor')
-			->set($this->db->quoteName('articles') . ' = :articles')
+			->set($this->db->quoteName('items') . ' = :items')
 			->set($this->db->quoteName('links') . ' = :links')
 			->set($this->db->quoteName('repair_status') . ' = :repair')
+			->set($this->db->quoteName('repair_type') . ' = :rkind')
 			->set($this->db->quoteName('repair_cursor') . ' = :rcursor')
 			->where($this->db->quoteName('id') . ' = :id')
 			->bind(':status', $status)
+			->bind(':kind', $kind)
 			->bind(':cursor', $cursor, ParameterType::INTEGER)
-			->bind(':articles', $articles, ParameterType::INTEGER)
+			->bind(':items', $items, ParameterType::INTEGER)
 			->bind(':links', $links, ParameterType::INTEGER)
 			->bind(':repair', $repair)
+			->bind(':rkind', $rkind)
 			->bind(':rcursor', $rcursor, ParameterType::INTEGER)
 			->bind(':id', $id, ParameterType::INTEGER);
 
@@ -153,7 +159,9 @@ final class DatabaseScanStore implements ScanStore
 	private function select(): QueryInterface
 	{
 		return $this->db->getQuery(true)
-			->select($this->db->quoteName(['id', 'task_id', 'status', 'cursor_id', 'articles', 'links', 'repair_status', 'repair_cursor']))
+			->select($this->db->quoteName([
+				'id', 'task_id', 'status', 'cursor_type', 'cursor_id', 'items', 'links', 'repair_status', 'repair_type', 'repair_cursor',
+			]))
 			->from($this->db->quoteName(self::SCANS));
 	}
 
@@ -167,10 +175,12 @@ final class DatabaseScanStore implements ScanStore
 			(int) $row->id,
 			(int) $row->task_id,
 			(string) $row->status,
+			(string) $row->cursor_type,
 			(int) $row->cursor_id,
-			(int) $row->articles,
+			(int) $row->items,
 			(int) $row->links,
 			(string) $row->repair_status,
+			(string) $row->repair_type,
 			(int) $row->repair_cursor
 		);
 	}

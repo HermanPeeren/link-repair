@@ -25,24 +25,29 @@ final class MemoryLinkStore implements LinkStore
         }
     }
 
-    public function nextArticle(int $scanId, string $state, int $afterArticleId): ?int
+    public function nextItem(int $scanId, string $state, string $afterKind, int $afterId): ?array
     {
-        $ids = [];
+        $next = null;
 
         foreach ($this->records as $record) {
-            if ($record->scanId === $scanId && $record->state === $state && $record->articleId > $afterArticleId) {
-                $ids[] = $record->articleId;
+            $key = [$record->itemKind, $record->itemId];
+
+            if ($record->scanId === $scanId && $record->state === $state && $key > [$afterKind, $afterId] && ($next === null || $key < $next)) {
+                $next = $key;
             }
         }
 
-        return $ids === [] ? null : min($ids);
+        return $next;
     }
 
-    public function forArticle(int $scanId, int $articleId, string $state): array
+    public function forItem(int $scanId, string $kind, int $itemId, string $state): array
     {
         return array_values(array_filter(
             $this->records,
-            static fn (LinkRecord $record): bool => $record->scanId === $scanId && $record->articleId === $articleId && $record->state === $state
+            static fn (LinkRecord $record): bool => $record->scanId === $scanId
+                && $record->itemKind === $kind
+                && $record->itemId === $itemId
+                && $record->state === $state
         ));
     }
 

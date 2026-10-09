@@ -15,30 +15,34 @@ namespace Yepr\Plugin\Task\LinkRepair\Store;
 
 /**
  * Keeps the links a scan found.
+ *
+ * Items are ordered by kind name, then id: the order the scan reads them in.
  */
 interface LinkStore
 {
 	/**
-	 * Stores the links of one article, all or none.
+	 * Stores the links of one item, all or none.
 	 *
 	 * @param   list<LinkRecord>  $records  Records with id 0.
 	 */
 	public function add(array $records): void;
 
 	/**
-	 * The next article after $afterArticleId with a link in the given state.
+	 * The next item after ($afterKind, $afterId) with a link in the given state.
+	 *
+	 * @return  array{0: string, 1: int}|null  Its kind and id.
 	 */
-	public function nextArticle(int $scanId, string $state, int $afterArticleId): ?int;
+	public function nextItem(int $scanId, string $state, string $afterKind, int $afterId): ?array;
 
 	/**
 	 * @return  list<LinkRecord>
 	 */
-	public function forArticle(int $scanId, int $articleId, string $state): array;
+	public function forItem(int $scanId, string $kind, int $itemId, string $state): array;
 
 	public function mark(int $id, string $state, string $message): void;
 
 	/**
-	 * All links of a scan, by article, read a page at a time.
+	 * All links of a scan, read a page at a time.
 	 *
 	 * @return  iterable<LinkRecord>
 	 */
