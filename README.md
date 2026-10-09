@@ -1,8 +1,13 @@
 # Link Repair
 
 A Joomla 6.1+ task plugin that finds links in articles, category descriptions and custom
-modules that were typed as URLs to pages of the same site (`/user-manual/seo/...`), and turns them into links to menu items
-(`index.php?Itemid=123`), as the editor's **CMS Content > Menu** button makes them.
+modules that were typed as URLs to pages of the same site (`/user-manual/seo/...`), and
+turns them into links to menu items (`index.php?Itemid=123`), as the editor's
+**CMS Content > Menu** button makes them.
+
+> **Made for sites where every page that is linked to has its own menu item.** A link
+> to a page without one (an article shown through a category blog, say) is not changed:
+> the report lists it as *unmatched*, to be fixed by hand.
 
 Typed links break, or only keep working through redirects, as soon as a menu item's
 alias or place in the menu changes. Links to menu items don't: Joomla builds the
