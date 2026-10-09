@@ -1,0 +1,13 @@
+{
+  "name": "link-repair",
+  "private": true,
+  "type": "module",
+  "description": "Cypress specs for the link repair task plugin, run against the development Joomla in /joomla.",
+  "scripts": {
+    "cypress": "cypress run",
+    "cypress:open": "cypress open"
+  },
+  "devDependencies": {
+    "cypress": "^15.21.1"
+  }
+}
